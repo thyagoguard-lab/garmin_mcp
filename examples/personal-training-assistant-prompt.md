@@ -225,10 +225,15 @@ small and only add tools you actually end up using:
 ```json
 {
   "env": {
-    "GARMIN_ENABLED_TOOLS": "get_sleep_data,get_stress_summary,get_activities,get_activities_by_date,get_activity,get_activity_splits"
+    "GARMIN_ENABLED_TOOLS": "get_sleep_data,get_stress_summary,get_activities,get_activities_by_date,get_activity,get_activity_splits,get_activity_exercise_sets"
   }
 }
 ```
+
+`get_activity_exercise_sets` adds per-set detail for strength training
+activities (exercise, reps, weight, duration, rest between sets) — worth
+including if strength training is part of your routine and your watch logs
+sets/reps (e.g. via the Instinct 2X's rep-counting strength profile).
 
 For a first phase, deliberately leave out tools for nutrition, challenges and
 badges, gear, courses, FIT file analysis, advanced cycling analysis, workout
