@@ -1456,6 +1456,161 @@ def _parse_fit(fit_bytes: bytes, include_records: bool) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Running dynamics (HRM-Run / HRM-Pro / Running Dynamics Pod)
+# ---------------------------------------------------------------------------
+
+def _add_derived_stride_metrics(d: dict, prefix: str) -> dict:
+    """Add stride/flight time, derived algebraically from ground contact time
+    and ground contact time percent — both fields Garmin's firmware measures
+    directly. This intentionally avoids the FIT 'cadence' field, whose running
+    convention (single-leg steps/min vs. total steps/min, doubled by some
+    tools) is inconsistent across sources and not worth risking silently.
+    """
+    stance_ms = d.get(f"{prefix}ground_contact_time_ms")
+    stance_pct = d.get(f"{prefix}ground_contact_time_pct")
+    if stance_ms and stance_pct:
+        stride_ms = stance_ms / (stance_pct / 100.0)
+        d[f"{prefix}stride_time_ms"] = round(stride_ms, 1)
+        d[f"{prefix}flight_time_ms"] = round(stride_ms - stance_ms, 1)
+    return d
+
+
+def _parse_running_dynamics(fit_bytes: bytes, include_records: bool) -> dict:
+    """Parse a FIT file and extract HRM-Run / HRM-Pro / Running Dynamics Pod metrics.
+
+    Ground contact time, vertical oscillation, vertical ratio, step length and
+    ground contact time balance are all measured natively by Garmin's firmware
+    when a compatible chest strap or pod is paired and "Advanced Running
+    Metrics" is active — nothing here is estimated from raw accelerometer
+    data. The only derived values are stride_time_ms / flight_time_ms, and
+    those come from an algebraic identity between two native measurements
+    (ground_contact_time_ms and ground_contact_time_pct), not from a
+    biomechanical model.
+
+    Deliberately not attempted: horizontal/braking force, vertical leg
+    stiffness, impact G-force, take-off velocity. Those require force-plate
+    or lab-grade IMU data that a wrist watch and chest strap don't produce.
+    """
+    fit_bytes = _extract_fit_bytes(fit_bytes)
+    fitfile = fitparse.FitFile(io.BytesIO(fit_bytes))
+
+    session: Dict[str, Any] = {}
+    laps: List[Dict] = []
+    records: List[Dict] = []
+
+    for message in fitfile.get_messages():
+        msg_type = message.name
+
+        if msg_type == "session":
+            session = {
+                "sport": _get_field(message, "sport"),
+                "sub_sport": _get_field(message, "sub_sport"),
+                "start_time": str(_get_field(message, "start_time") or ""),
+                "total_elapsed_time_s": _get_field(message, "total_elapsed_time"),
+                "total_distance_m": _get_field(message, "total_distance"),
+                "avg_speed_mps": _get_field(message, "avg_speed"),
+                "max_speed_mps": _get_field(message, "max_speed"),
+                "avg_heart_rate_bpm": _get_field(message, "avg_heart_rate"),
+                "max_heart_rate_bpm": _get_field(message, "max_heart_rate"),
+                "avg_running_cadence_rpm": _get_field(message, "avg_cadence"),
+                "max_running_cadence_rpm": _get_field(message, "max_cadence"),
+                "avg_vertical_oscillation_mm": _get_field(message, "avg_vertical_oscillation"),
+                "avg_ground_contact_time_ms": _get_field(message, "avg_stance_time"),
+                "avg_ground_contact_time_pct": _get_field(message, "avg_stance_time_percent"),
+                "avg_ground_contact_balance_pct": _get_field(message, "avg_stance_time_balance"),
+                "avg_vertical_ratio_pct": _get_field(message, "avg_vertical_ratio"),
+                "avg_step_length_mm": _get_field(message, "avg_step_length"),
+                "total_training_effect": _get_field(message, "total_training_effect"),
+                "total_anaerobic_training_effect": _get_field(message, "total_anaerobic_training_effect"),
+            }
+            session = _add_derived_stride_metrics(session, prefix="avg_")
+            session = {k: v for k, v in session.items() if v is not None}
+
+        elif msg_type == "lap":
+            lap: Dict[str, Any] = {
+                "lap_number": len(laps) + 1,
+                "start_time": str(_get_field(message, "start_time") or ""),
+                "total_elapsed_time_s": _get_field(message, "total_elapsed_time"),
+                "total_distance_m": _get_field(message, "total_distance"),
+                "avg_speed_mps": _get_field(message, "avg_speed"),
+                "avg_heart_rate_bpm": _get_field(message, "avg_heart_rate"),
+                "avg_running_cadence_rpm": _get_field(message, "avg_cadence"),
+                "avg_vertical_oscillation_mm": _get_field(message, "avg_vertical_oscillation"),
+                "avg_ground_contact_time_ms": _get_field(message, "avg_stance_time"),
+                "avg_ground_contact_time_pct": _get_field(message, "avg_stance_time_percent"),
+                "avg_ground_contact_balance_pct": _get_field(message, "avg_stance_time_balance"),
+                "avg_vertical_ratio_pct": _get_field(message, "avg_vertical_ratio"),
+                "avg_step_length_mm": _get_field(message, "avg_step_length"),
+            }
+            lap = _add_derived_stride_metrics(lap, prefix="avg_")
+            lap = {k: v for k, v in lap.items() if v is not None}
+            laps.append(lap)
+
+        elif msg_type == "record":
+            record: Dict[str, Any] = {
+                "timestamp": str(_get_field(message, "timestamp") or ""),
+                "heart_rate_bpm": _get_field(message, "heart_rate"),
+                "speed_mps": _get_field(message, "speed"),
+                "cadence_rpm": _get_field(message, "cadence"),
+                "vertical_oscillation_mm": _get_field(message, "vertical_oscillation"),
+                "ground_contact_time_ms": _get_field(message, "stance_time"),
+                "ground_contact_time_pct": _get_field(message, "stance_time_percent"),
+                "ground_contact_balance_pct": _get_field(message, "stance_time_balance"),
+                "vertical_ratio_pct": _get_field(message, "vertical_ratio"),
+                "step_length_mm": _get_field(message, "step_length"),
+            }
+            record = _add_derived_stride_metrics(record, prefix="")
+            record = {k: v for k, v in record.items() if v is not None}
+            records.append(record)
+
+    dynamics_keys = (
+        "vertical_oscillation", "ground_contact_time_ms",
+        "ground_contact_time_pct", "vertical_ratio_pct", "step_length_mm",
+    )
+    has_dynamics = any(
+        any(key in r for key in dynamics_keys) for r in records
+    ) or any(f"avg_{key}" in session for key in dynamics_keys)
+
+    result: Dict[str, Any] = {
+        "session": session,
+        "laps": laps,
+        "has_running_dynamics_data": has_dynamics,
+    }
+
+    if not has_dynamics:
+        result["note"] = (
+            "No running dynamics fields (vertical oscillation, ground contact time, "
+            "vertical ratio, step length) found in this FIT file. These require a "
+            "paired HRM-Run, HRM-Pro (or similar chest strap) or a Running Dynamics "
+            "Pod, with the activity recorded while that sensor was connected."
+        )
+    else:
+        result["note"] = (
+            "ground_contact_balance_pct is Garmin's stance_time_balance field "
+            "(documented as the right-leg share of ground contact time). Cross-check "
+            "one session against Garmin Connect's own L/R balance display before "
+            "reading small deviations as meaningful asymmetry."
+        )
+
+    if records:
+        step_lengths = [r["step_length_mm"] for r in records if "step_length_mm" in r]
+        cadences = [r["cadence_rpm"] for r in records if "cadence_rpm" in r]
+        gct_balance = [r["ground_contact_balance_pct"] for r in records if "ground_contact_balance_pct" in r]
+        if step_lengths:
+            session["max_step_length_mm"] = max(step_lengths)
+        if cadences:
+            session["max_running_cadence_rpm_observed"] = max(cadences)
+        if gct_balance:
+            deviations = [abs(b - 50.0) for b in gct_balance]
+            session["max_ground_contact_balance_deviation_pct"] = round(max(deviations), 1)
+
+    if include_records:
+        result["records"] = records
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # MCP tool registration
 # ---------------------------------------------------------------------------
 
@@ -1644,6 +1799,84 @@ def register_tools(app):
                         if climb_w:
                             climb["avg_w_per_kg"] = round(climb_w / weight_kg, 2)
 
+            return json.dumps(parsed, indent=2, default=str)
+
+        except Exception as e:
+            return f"Error downloading FIT data for activity {activity_id}: {str(e)}"
+
+    @app.tool()
+    async def get_activity_running_dynamics(
+        activity_id: Union[int, str],
+        include_records: bool = False,
+    ) -> str:
+        """Download and parse FIT file for a run to expose HRM-Run/Pod running dynamics.
+
+        Requires a compatible chest strap (HRM-Run, HRM-Pro) or Running Dynamics
+        Pod paired to the watch during the activity — a wrist-only recording has
+        none of these fields, and the tool says so via has_running_dynamics_data.
+
+        Returns per session and per lap (all measured directly by Garmin's
+        firmware, not estimated here):
+        - avg/max running cadence
+        - avg vertical oscillation (mm) and vertical ratio (%)
+        - avg ground contact time (ms) and ground contact time as % of stride
+        - avg ground contact time left/right balance (%)
+        - avg step length (mm)
+        - stride_time_ms / flight_time_ms — derived algebraically from ground
+          contact time and its percentage of stride time (not from cadence,
+          whose running-mode convention is inconsistent across tools)
+
+        Session-level extremes not natively summarized by Garmin: max step
+        length, max observed cadence, max ground-contact balance deviation
+        from 50/50.
+
+        Deliberately NOT computed: horizontal/braking force, vertical leg
+        stiffness, impact G-force, take-off velocity. Those need force-plate
+        or lab IMU data a watch and chest strap don't produce — treat any
+        tool or figure claiming otherwise from this kind of hardware with
+        suspicion.
+
+        Args:
+            activity_id: Garmin activity ID (should be a running activity)
+            include_records: Include full per-second time series (default False).
+                             Warning: adds significant data volume for long runs.
+        """
+        if not FITPARSE_AVAILABLE:
+            return (
+                "fitparse library is not installed. "
+                "Install it with: pip install fitparse"
+            )
+
+        try:
+            activity_id = int(activity_id)
+            from garminconnect import Garmin
+
+            fit_bytes = garmin_client.download_activity(
+                activity_id,
+                dl_fmt=Garmin.ActivityDownloadFormat.ORIGINAL,
+            )
+
+            if not fit_bytes:
+                return f"No FIT data returned for activity {activity_id}"
+
+            raw = bytes(fit_bytes)
+
+            try:
+                parsed = _parse_running_dynamics(raw, include_records=include_records)
+            except Exception as parse_err:
+                return json.dumps({
+                    "error": str(parse_err),
+                    "debug": {
+                        "total_bytes": len(raw),
+                        "first_16_bytes_hex": raw[:16].hex(),
+                        "hint": (
+                            "1f8b = gzip, 504b = ZIP, 0e10/0c10 = raw FIT, "
+                            "3c or 7b = HTML/JSON error from Garmin"
+                        ),
+                    }
+                }, indent=2)
+
+            parsed["activity_id"] = activity_id
             return json.dumps(parsed, indent=2, default=str)
 
         except Exception as e:

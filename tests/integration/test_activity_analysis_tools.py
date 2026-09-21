@@ -1434,3 +1434,157 @@ async def test_download_activity_file_fit_extraction_failure(
     assert "error" in data
     assert "first_16_bytes_hex" in data["debug"]
     assert not (tmp_path / f"{ACTIVITY_ID}.fit").exists()
+
+
+# ---------------------------------------------------------------------------
+# Running dynamics (HRM-Run / HRM-Pro / Running Dynamics Pod)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_activity_running_dynamics_session_fields(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """Native running dynamics session fields are surfaced, plus derived stride/flight time."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+
+    session_msg = _make_mock_fit_message("session", {
+        "sport": "running",
+        "total_elapsed_time": 1800.0,
+        "total_distance": 5000.0,
+        "avg_speed": 2.78,
+        "avg_heart_rate": 155,
+        "avg_cadence": 88,
+        "avg_vertical_oscillation": 78,
+        "avg_stance_time": 220.0,
+        "avg_stance_time_percent": 32.5,
+        "avg_stance_time_balance": 50.4,
+        "avg_vertical_ratio": 6.8,
+        "avg_step_length": 1150,
+    })
+
+    with patch("garmin_mcp.activity_analysis.fitparse") as mock_fp:
+        mock_fp.FitFile.return_value = _mock_fitfile([session_msg])
+        result = await app_with_activity_analysis.call_tool(
+            "get_activity_running_dynamics", {"activity_id": ACTIVITY_ID}
+        )
+
+    data = json.loads(result[0][0].text)
+    session = data["session"]
+
+    assert data["has_running_dynamics_data"] is True
+    assert session["sport"] == "running"
+    assert session["avg_vertical_oscillation_mm"] == 78
+    assert session["avg_ground_contact_time_ms"] == 220.0
+    assert session["avg_ground_contact_time_pct"] == 32.5
+    assert session["avg_step_length_mm"] == 1150
+    # stride_time_ms = 220 / (32.5/100) = 676.9..., flight = stride - 220
+    assert session["avg_stride_time_ms"] == pytest.approx(676.9, abs=0.1)
+    assert session["avg_flight_time_ms"] == pytest.approx(456.9, abs=0.1)
+
+
+@pytest.mark.asyncio
+async def test_get_activity_running_dynamics_no_sensor_data(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """A wrist-only run (no HRM-Run/Pod) has no dynamics fields; the tool says so."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+
+    session_msg = _make_mock_fit_message("session", {
+        "sport": "running",
+        "avg_heart_rate": 150,
+        "avg_cadence": 85,
+    })
+    record_msg = _make_mock_fit_message("record", {"heart_rate": 150})
+
+    with patch("garmin_mcp.activity_analysis.fitparse") as mock_fp:
+        mock_fp.FitFile.return_value = _mock_fitfile([session_msg, record_msg])
+        result = await app_with_activity_analysis.call_tool(
+            "get_activity_running_dynamics", {"activity_id": ACTIVITY_ID}
+        )
+
+    data = json.loads(result[0][0].text)
+
+    assert data["has_running_dynamics_data"] is False
+    assert "note" in data
+    assert "HRM-Run" in data["note"]
+
+
+@pytest.mark.asyncio
+async def test_get_activity_running_dynamics_record_aggregates(
+    app_with_activity_analysis, mock_garmin_client
+):
+    """Per-record dynamics feed session-level extremes not natively summarized by Garmin."""
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+
+    records = [
+        _make_mock_fit_message("record", {
+            "heart_rate": 150, "cadence": 86,
+            "vertical_oscillation": 76, "stance_time": 225.0,
+            "stance_time_percent": 33.0, "stance_time_balance": 49.0,
+            "vertical_ratio": 6.9, "step_length": 1120,
+        }),
+        _make_mock_fit_message("record", {
+            "heart_rate": 158, "cadence": 90,
+            "vertical_oscillation": 74, "stance_time": 210.0,
+            "stance_time_percent": 31.0, "stance_time_balance": 53.0,
+            "vertical_ratio": 6.5, "step_length": 1180,
+        }),
+    ]
+
+    with patch("garmin_mcp.activity_analysis.fitparse") as mock_fp:
+        mock_fp.FitFile.return_value = _mock_fitfile(records)
+        result = await app_with_activity_analysis.call_tool(
+            "get_activity_running_dynamics", {"activity_id": ACTIVITY_ID}
+        )
+
+    data = json.loads(result[0][0].text)
+    session = data["session"]
+
+    assert data["has_running_dynamics_data"] is True
+    assert session["max_step_length_mm"] == 1180
+    assert session["max_running_cadence_rpm_observed"] == 90
+    # balances 49.0 and 53.0 -> deviations from 50 are 1.0 and 3.0 -> max 3.0
+    assert session["max_ground_contact_balance_deviation_pct"] == 3.0
+    assert "records" not in data
+
+
+@pytest.mark.asyncio
+async def test_get_activity_running_dynamics_records_included_when_requested(
+    app_with_activity_analysis, mock_garmin_client
+):
+    mock_garmin_client.download_activity.return_value = b"\x00" * 20
+
+    record_msg = _make_mock_fit_message("record", {
+        "heart_rate": 150, "vertical_oscillation": 76, "stance_time": 225.0,
+        "stance_time_percent": 33.0,
+    })
+
+    with patch("garmin_mcp.activity_analysis.fitparse") as mock_fp:
+        mock_fp.FitFile.return_value = _mock_fitfile([record_msg])
+        result = await app_with_activity_analysis.call_tool(
+            "get_activity_running_dynamics",
+            {"activity_id": ACTIVITY_ID, "include_records": True},
+        )
+
+    data = json.loads(result[0][0].text)
+
+    assert len(data["records"]) == 1
+    rec = data["records"][0]
+    assert rec["vertical_oscillation_mm"] == 76
+    assert rec["ground_contact_time_ms"] == 225.0
+    # stride_time_ms = 225 / 0.33 = 681.8..., flight = stride - 225
+    assert rec["flight_time_ms"] == pytest.approx(456.8, abs=0.1)
+
+
+@pytest.mark.asyncio
+async def test_get_activity_running_dynamics_none_response(
+    app_with_activity_analysis, mock_garmin_client
+):
+    mock_garmin_client.download_activity.return_value = None
+
+    result = await app_with_activity_analysis.call_tool(
+        "get_activity_running_dynamics", {"activity_id": ACTIVITY_ID}
+    )
+    text = result[0][0].text
+
+    assert "No FIT data returned" in text

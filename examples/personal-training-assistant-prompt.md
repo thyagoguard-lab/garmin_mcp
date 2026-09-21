@@ -225,7 +225,7 @@ small and only add tools you actually end up using:
 ```json
 {
   "env": {
-    "GARMIN_ENABLED_TOOLS": "get_sleep_data,get_stress_summary,get_activities,get_activities_by_date,get_activity,get_activity_splits,get_activity_exercise_sets"
+    "GARMIN_ENABLED_TOOLS": "get_sleep_data,get_stress_summary,get_activities,get_activities_by_date,get_activity,get_activity_splits,get_activity_exercise_sets,get_activity_running_dynamics"
   }
 }
 ```
@@ -235,8 +235,18 @@ activities (exercise, reps, weight, duration, rest between sets) — worth
 including if strength training is part of your routine and your watch logs
 sets/reps (e.g. via the Instinct 2X's rep-counting strength profile).
 
+`get_activity_running_dynamics` adds ground contact time, vertical
+oscillation, vertical ratio, step length and ground contact time balance —
+worth including if you run with a paired HRM-Run/HRM-Pro chest strap or
+Running Dynamics Pod (a wrist-only run has none of these fields). It
+downloads and parses the activity's original FIT file, so it's heavier than
+a plain summary call — keep the "only fetch full activity detail when asked"
+rule from the prompt above in mind and don't call it on every question about
+a run, only when the sprint/jump technique itself is what's being asked
+about.
+
 For a first phase, deliberately leave out tools for nutrition, challenges and
-badges, gear, courses, FIT file analysis, advanced cycling analysis, workout
+badges, gear, courses, advanced cycling FIT analysis, workout
 creation/scheduling, women's health data, and any other write operations.
 That keeps the tool surface small and lowers the chance of the model reaching
 for an overly detailed tool when a summary would do.

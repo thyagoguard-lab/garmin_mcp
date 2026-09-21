@@ -20,6 +20,7 @@ Garmin's API is accessed via the awesome [python-garminconnect](https://github.c
 - Inspect detailed workout step structures, including repeat groups and swim pace targets
 - Weekly health aggregates (steps, stress, intensity minutes)
 - Advanced cycling analytics: power zones, FIT file analysis, DI2 electronic shift intelligence
+- Running dynamics from a paired HRM-Run/HRM-Pro chest strap or Running Dynamics Pod: ground contact time, vertical oscillation, vertical ratio, step length, ground contact balance
 - Training load trend (CTL/ATL/TSB), HRV trend, VO2 max trend, respiration rate trend
 - Power Duration Curve, climb detection with VAM, cardiac drift (aerobic decoupling), W/kg calculations
 
@@ -40,10 +41,10 @@ This MCP server implements **110+ tools** covering ~90% of the [python-garmincon
 - ✅ User Profile (3 tools)
 - ✅ High-Level Workout Builders (4 tools) - create and schedule workouts without writing JSON
 - ✅ Courses (5 tools) - list / get details / upload GPX as course / download GPX / delete course
-- ✅ Activity Analysis (2 tools) - FIT file parsing, Power Duration Curve; requires power meter and/or Di2
+- ✅ Activity Analysis (3 tools) - FIT file parsing, Power Duration Curve, running dynamics; requires power meter and/or Di2 for cycling, HRM-Run/HRM-Pro or a Running Dynamics Pod for running
 - ✅ Activity File Downloads (2 tools) - download activity files in FIT, GPX, TCX, or CSV format
 
-> **Note:** Activity Analysis tools require a compatible power meter (e.g., Garmin Rally, Favero Assioma, PowerTap P1) and/or Shimano Di2 / SRAM eTap electronic shifting. The `fitparse` dependency is installed automatically.
+> **Note:** Cycling analysis tools require a compatible power meter (e.g., Garmin Rally, Favero Assioma, PowerTap P1) and/or Shimano Di2 / SRAM eTap electronic shifting. `get_activity_running_dynamics` requires a paired HRM-Run, HRM-Pro (or similar chest strap) or Running Dynamics Pod — a wrist-only recording has none of these fields. The `fitparse` dependency is installed automatically.
 
 ### Gear Notes
 
