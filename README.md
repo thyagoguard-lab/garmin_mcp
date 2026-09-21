@@ -880,6 +880,11 @@ Once connected in Claude, you can ask questions like:
 - "Show me my HRV trend for the last 2 weeks and flag any recovery concerns"
 - "What's my season best 20-minute power and when did I set it?"
 
+For a worked example of a token-efficient system prompt that turns this
+server into a personal training/recovery assistant (with a matching
+`GARMIN_ENABLED_TOOLS` config), see
+[examples/personal-training-assistant-prompt.md](examples/personal-training-assistant-prompt.md).
+
 ## Troubleshooting
 
 ### "Failed to spawn process: No such file or directory"
