@@ -12,7 +12,8 @@ import base64
 
 import requests
 from garminconnect import Garmin, GarminConnectAuthenticationError, GarminConnectConnectionError, GarminConnectTooManyRequestsError
-
+from garmin_mcp import mfa_patch
+mfa_patch.apply()
 from garmin_mcp.token_utils import (
     get_token_path,
     get_token_base64_path,
